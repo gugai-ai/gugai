@@ -1,4 +1,5 @@
 import Sidebar from "@/components/Sidebar";
+import ChatInput from "@/components/ChatInput";
 
 export default function Home() {
   return (
@@ -25,18 +26,8 @@ export default function Home() {
               best stack for your workflow.
             </p>
 
-            <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-950 p-3">
-              <div className="flex items-center gap-3">
-                <input
-                  type="text"
-                  placeholder="What do you want to accomplish?"
-                  className="flex-1 bg-transparent px-3 py-3 text-sm text-white outline-none placeholder:text-zinc-600"
-                />
-
-                <button className="rounded-xl bg-white px-5 py-3 text-sm font-medium text-black">
-                  Search
-                </button>
-              </div>
+            <div className="mt-8">
+            <ChatInput />
             </div>
           </div>
         </section>
