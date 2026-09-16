@@ -1,60 +1,60 @@
 export default function Sidebar() {
   return (
-    <aside className="flex h-screen w-64 flex-col border-r border-zinc-800 bg-zinc-950 text-zinc-100">
+    <aside className="flex h-screen w-16 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950 text-zinc-100 sm:w-64">
       {/* Logo */}
-      <div className="flex h-16 items-center border-b border-zinc-800 px-5">
+      <div className="flex h-16 items-center justify-center border-b border-zinc-800 px-2 sm:justify-start sm:px-5">
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white font-bold text-black">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white font-bold text-black">
             G
           </div>
 
-          <span className="text-xl font-semibold tracking-tight">
+          <span className="hidden text-xl font-semibold tracking-tight sm:inline">
             Gugai
           </span>
         </div>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-5">
-        <div className="mb-3 px-3 text-xs font-medium uppercase tracking-wider text-zinc-500">
+      <nav className="flex-1 px-2 py-5 sm:px-3">
+        <div className="mb-3 hidden px-3 text-xs font-medium uppercase tracking-wider text-zinc-500 sm:block">
           Discover
         </div>
 
-        <button className="mb-1 flex w-full items-center gap-3 rounded-lg bg-zinc-800 px-3 py-2.5 text-sm font-medium">
-          <span>⌂</span>
-          Home
+        <button aria-label="Home" className="mb-1 flex w-full items-center justify-center gap-3 rounded-lg bg-zinc-800 px-3 py-2.5 text-sm font-medium sm:justify-start">
+          <span aria-hidden="true">⌂</span>
+          <span className="hidden sm:inline">Home</span>
         </button>
 
-        <button className="mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white">
-          <span>⌕</span>
-          Explore
+        <button aria-label="Explore" className="mb-1 flex w-full items-center justify-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white sm:justify-start">
+          <span aria-hidden="true">⌕</span>
+          <span className="hidden sm:inline">Explore</span>
         </button>
 
-        <button className="mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white">
-          <span>◇</span>
-          Workflows
+        <button aria-label="Workflows" className="mb-1 flex w-full items-center justify-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white sm:justify-start">
+          <span aria-hidden="true">◇</span>
+          <span className="hidden sm:inline">Workflows</span>
         </button>
 
-        <div className="mb-3 mt-8 px-3 text-xs font-medium uppercase tracking-wider text-zinc-500">
+        <div className="mb-3 mt-8 hidden px-3 text-xs font-medium uppercase tracking-wider text-zinc-500 sm:block">
           Your Space
         </div>
 
-        <button className="mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white">
-          <span>♡</span>
-          Saved
+        <button aria-label="Saved" className="mb-1 flex w-full items-center justify-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white sm:justify-start">
+          <span aria-hidden="true">♡</span>
+          <span className="hidden sm:inline">Saved</span>
         </button>
 
-        <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white">
-          <span>◷</span>
-          Recent Chats
+        <button aria-label="Recent Chats" className="flex w-full items-center justify-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white sm:justify-start">
+          <span aria-hidden="true">◷</span>
+          <span className="hidden sm:inline">Recent Chats</span>
         </button>
       </nav>
 
       {/* Bottom */}
-      <div className="border-t border-zinc-800 p-4">
-        <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white">
-          <span>?</span>
-          Help & Feedback
+      <div className="border-t border-zinc-800 p-2 sm:p-4">
+        <button aria-label="Help and Feedback" className="flex w-full items-center justify-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white sm:justify-start">
+          <span aria-hidden="true">?</span>
+          <span className="hidden sm:inline">Help & Feedback</span>
         </button>
       </div>
     </aside>
