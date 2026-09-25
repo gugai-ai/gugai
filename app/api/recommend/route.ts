@@ -1,141 +1,391 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 type RecommendationState =
   | "EXACT_MATCH"
   | "PARTIAL_MATCH"
   | "NO_MATCH"
-  | "INSUFFICIENT_DATA";
+  | "INSUFFICIENT_DATA"
+  | "WORKFLOW_MATCH";
 
-type Intent = {
-  capabilitySlug: string | null;
-  capabilityName: string | null;
+type WorkflowIntent = {
+  slug: string;
+  name: string;
 };
 
-const capabilityRules: {
-  capabilitySlug: string;
-  capabilityName: string;
-  keywords: string[];
-}[] = [
+const WORKFLOW_INTENTS: WorkflowIntent[] = [
   {
-    capabilitySlug: "background-removal",
-    capabilityName: "Background Removal",
-    keywords: [
-      "remove background",
-      "remove the background",
-      "background removal",
-      "background remover",
-      "transparent background",
-      "remove bg",
-    ],
-  },
-  {
-    capabilitySlug: "image-editing",
-    capabilityName: "Image Editing",
-    keywords: [
-      "edit image",
-      "edit images",
-      "image editing",
-      "edit photo",
-      "edit photos",
-      "edit my product images",
-      "edit product images",
-      "product image editing",
-      "modify image",
-      "modify images",
-      "modify product images",
-    ],
-  },
-  {
-    capabilitySlug: "image-generation",
-    capabilityName: "Image Generation",
-    keywords: [
-      "generate image",
-      "generate images",
-      "create image",
-      "create images",
-      "ai image",
-      "image generation",
-      "generate a picture",
-      "create a picture",
-    ],
-  },
-  {
-    capabilitySlug: "speech-to-text",
-    capabilityName: "Speech to Text",
-    keywords: [
-      "speech to text",
-      "speech-to-text",
-      "transcribe",
-      "transcription",
-      "transcribe audio",
-      "convert audio to text",
-      "convert audio into text",
-      "audio to text",
-      "audio into text",
-      "podcast to text",
-      "podcast audio to text",
-      "podcast audio into text",
-    ],
-  },
-  {
-    capabilitySlug: "text-to-speech",
-    capabilityName: "Text to Speech",
-    keywords: [
-      "text to speech",
-      "text-to-speech",
-      "voiceover",
-      "voice over",
-      "read aloud",
-      "turn text into voice",
-      "convert text to audio",
-      "ai voice",
-    ],
-  },
-  {
-    capabilitySlug: "video-generation",
-    capabilityName: "Video Generation",
-    keywords: [
-      "generate video",
-      "generate videos",
-      "create video",
-      "create videos",
-      "ai video",
-      "video generation",
-      "text to video",
-      "image to video",
-    ],
+    slug: "podcast-to-video",
+    name: "Podcast to Video",
   },
 ];
 
-function detectIntent(query: string): Intent {
-  const normalizedQuery = query.toLowerCase().trim();
+function detectWorkflow(query: string): WorkflowIntent | null {
+  const normalized = query.toLowerCase();
 
-  for (const rule of capabilityRules) {
-    const matched = rule.keywords.some((keyword) =>
-      normalizedQuery.includes(keyword)
+  const hasPodcast =
+    normalized.includes("podcast");
+
+  const hasVideo =
+    normalized.includes("video") ||
+    normalized.includes("youtube") ||
+    normalized.includes("shorts");
+
+  if (hasPodcast && hasVideo) {
+    return WORKFLOW_INTENTS[0];
+  }
+
+  return null;
+}
+
+function detectCapability(query: string) {
+  const normalized = query.toLowerCase();
+
+  if (
+    normalized.includes("background") &&
+    (
+      normalized.includes("remove") ||
+      normalized.includes("removal")
+    )
+  ) {
+    return {
+      capabilitySlug: "background-removal",
+      capabilityName: "Background Removal",
+    };
+  }
+
+  if (
+    normalized.includes("video") &&
+    (
+      normalized.includes("create") ||
+      normalized.includes("generate") ||
+      normalized.includes("make")
+    )
+  ) {
+    return {
+      capabilitySlug: "video-generation",
+      capabilityName: "Video Generation",
+    };
+  }
+
+  if (
+    normalized.includes("podcast") &&
+    (
+      normalized.includes("text") ||
+      normalized.includes("transcri")
+    )
+  ) {
+    return {
+      capabilitySlug: "speech-to-text",
+      capabilityName: "Speech to Text",
+    };
+  }
+
+  if (
+    normalized.includes("voiceover") ||
+    normalized.includes("voice over") ||
+    normalized.includes("read aloud")
+  ) {
+    return {
+      capabilitySlug: "text-to-speech",
+      capabilityName: "Text to Speech",
+    };
+  }
+
+  if (
+    normalized.includes("image") &&
+    (
+      normalized.includes("generate") ||
+      normalized.includes("create")
+    )
+  ) {
+    return {
+      capabilitySlug: "image-generation",
+      capabilityName: "Image Generation",
+    };
+  }
+
+  if (
+    normalized.includes("image") &&
+    (
+      normalized.includes("edit") ||
+      normalized.includes("editing")
+    )
+  ) {
+    return {
+      capabilitySlug: "image-editing",
+      capabilityName: "Image Editing",
+    };
+  }
+
+  return null;
+}
+
+async function getVerifiedToolsForCapability(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  capabilityId: string
+) {
+  const { data: toolCapabilities, error: toolCapabilityError } =
+    await supabase
+      .from("tool_capabilities")
+      .select(`
+        tool_id,
+        capability_id,
+        support_mode,
+        tools (
+          id,
+          name,
+          slug,
+          short_description,
+          website_url,
+          logo_url,
+          verification_status,
+          status,
+          companies (
+            id,
+            name,
+            logo_url
+          )
+        )
+      `)
+      .eq("capability_id", capabilityId)
+      .eq("support_mode", "FULL");
+
+  if (toolCapabilityError) {
+    throw new Error(toolCapabilityError.message);
+  }
+
+  const verifiedTools = [];
+
+  for (const relationship of toolCapabilities ?? []) {
+    const tool = Array.isArray(relationship.tools)
+      ? relationship.tools[0]
+      : relationship.tools;
+
+    if (!tool || tool.status !== "ACTIVE") {
+      continue;
+    }
+
+    const { data: claims, error: claimError } = await supabase
+      .from("claims")
+      .select("id")
+      .eq("tool_id", relationship.tool_id)
+      .eq("capability_id", capabilityId)
+      .eq("claim_type", "CAPABILITY_SUPPORT")
+      .eq("status", "ACTIVE");
+
+    if (claimError) {
+      throw new Error(claimError.message);
+    }
+
+    let capabilityVerified = false;
+
+    for (const claim of claims ?? []) {
+      const { data: verification, error: verificationError } =
+        await supabase
+          .from("verifications")
+          .select("status")
+          .eq("claim_id", claim.id)
+          .eq("status", "VERIFIED")
+          .limit(1)
+          .maybeSingle();
+
+      if (verificationError) {
+        throw new Error(verificationError.message);
+      }
+
+      if (verification) {
+        capabilityVerified = true;
+        break;
+      }
+    }
+
+    if (!capabilityVerified) {
+      continue;
+    }
+
+    verifiedTools.push({
+      ...tool,
+      matched_capability_verification_status: "VERIFIED",
+    });
+  }
+
+  return verifiedTools;
+}
+
+async function recommendWorkflow(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  workflowIntent: WorkflowIntent,
+  query: string
+) {
+  const { data: workflow, error: workflowError } = await supabase
+    .from("workflows")
+    .select(`
+      id,
+      name,
+      slug,
+      description,
+      icon_key,
+      status,
+      follow_up_prompts
+    `)
+    .eq("slug", workflowIntent.slug)
+    .eq("status", "ACTIVE")
+    .maybeSingle();
+
+  if (workflowError) {
+    throw new Error(workflowError.message);
+  }
+
+  if (!workflow) {
+    return {
+      success: true,
+      state: "INSUFFICIENT_DATA" as RecommendationState,
+      query,
+      intent: {
+        workflowSlug: workflowIntent.slug,
+      },
+      message: "The requested workflow is not currently available.",
+      workflow: null,
+      steps: [],
+      tools: [],
+    };
+  }
+
+  const { data: steps, error: stepsError } = await supabase
+    .from("workflow_steps")
+    .select(`
+      id,
+      workflow_id,
+      step_order,
+      name,
+      description,
+      required_capability_id,
+      input_artifact,
+      output_artifact,
+      constraints
+    `)
+    .eq("workflow_id", workflow.id)
+    .order("step_order");
+
+  if (stepsError) {
+    throw new Error(stepsError.message);
+  }
+
+  if (!steps || steps.length === 0) {
+    return {
+      success: true,
+      state: "INSUFFICIENT_DATA" as RecommendationState,
+      query,
+      intent: {
+        workflowSlug: workflow.slug,
+        workflowName: workflow.name,
+      },
+      message: "This workflow does not have any configured steps yet.",
+      workflow,
+      steps: [],
+      tools: [],
+    };
+  }
+
+  const workflowSteps = [];
+
+  for (const step of steps) {
+    if (!step.required_capability_id) {
+      workflowSteps.push({
+        ...step,
+        capability: null,
+        tools: [],
+        state: "INSUFFICIENT_DATA" as RecommendationState,
+      });
+
+      continue;
+    }
+
+    const { data: capability, error: capabilityError } =
+      await supabase
+        .from("capabilities")
+        .select(`
+          id,
+          name,
+          slug
+        `)
+        .eq("id", step.required_capability_id)
+        .maybeSingle();
+
+    if (capabilityError) {
+      throw new Error(capabilityError.message);
+    }
+
+    const tools = await getVerifiedToolsForCapability(
+      supabase,
+      step.required_capability_id
     );
 
-    if (matched) {
-      return {
-        capabilitySlug: rule.capabilitySlug,
-        capabilityName: rule.capabilityName,
-      };
+    workflowSteps.push({
+      ...step,
+      capability,
+      tools,
+      state:
+        tools.length > 0
+          ? ("EXACT_MATCH" as RecommendationState)
+          : ("INSUFFICIENT_DATA" as RecommendationState),
+    });
+  }
+
+  const allStepsHaveTools = workflowSteps.every(
+    (step) => step.tools.length > 0
+  );
+
+  const anyStepHasTools = workflowSteps.some(
+    (step) => step.tools.length > 0
+  );
+
+  let state: RecommendationState;
+
+  if (allStepsHaveTools) {
+    state = "WORKFLOW_MATCH";
+  } else if (anyStepHasTools) {
+    state = "PARTIAL_MATCH";
+  } else {
+    state = "INSUFFICIENT_DATA";
+  }
+
+  /*
+   * Flatten tools for compatibility with the current page.tsx.
+   * The structured workflow steps remain the canonical response.
+   */
+  const uniqueTools = new Map<string, any>();
+
+  for (const step of workflowSteps) {
+    for (const tool of step.tools) {
+      uniqueTools.set(tool.id, tool);
     }
   }
 
   return {
-    capabilitySlug: null,
-    capabilityName: null,
+    success: true,
+    state,
+    query,
+    intent: {
+      workflowSlug: workflow.slug,
+      workflowName: workflow.name,
+    },
+    workflow,
+    steps: workflowSteps,
+    count: uniqueTools.size,
+    tools: Array.from(uniqueTools.values()),
   };
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     const body = await request.json();
 
     const query =
-      typeof body.query === "string" ? body.query.trim() : "";
+      typeof body?.query === "string"
+        ? body.query.trim()
+        : "";
 
     if (!query) {
       return NextResponse.json(
@@ -147,34 +397,69 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ---------------------------------------------------------
-    // 1. Detect the capability required by the user's request.
-    // ---------------------------------------------------------
+    const supabase = await createClient();
 
-    const intent = detectIntent(query);
+    /*
+     * ---------------------------------------------------------
+     * 1. WORKFLOW MATCHING
+     * ---------------------------------------------------------
+     *
+     * Check workflows first because a workflow query can contain
+     * capability keywords such as "video".
+     *
+     * Example:
+     * "Turn my podcast into a video"
+     *
+     * should become:
+     * Podcast to Video workflow
+     *
+     * rather than:
+     * Video Generation only.
+     */
+    const workflowIntent = detectWorkflow(query);
 
-    if (!intent.capabilitySlug) {
+    if (workflowIntent) {
+      return NextResponse.json(
+        await recommendWorkflow(
+          supabase,
+          workflowIntent,
+          query
+        )
+      );
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * 2. SINGLE CAPABILITY MATCHING
+     * ---------------------------------------------------------
+     *
+     * Preserve the existing deterministic recommendation path.
+     */
+    const intent = detectCapability(query);
+
+    if (!intent) {
       return NextResponse.json({
         success: true,
         state: "INSUFFICIENT_DATA" as RecommendationState,
         query,
-        intent,
+        intent: {
+          capabilitySlug: null,
+          capabilityName: null,
+        },
         message:
           "I could not determine the required capability from this request.",
         tools: [],
       });
     }
 
-    const supabase = await createClient();
-
-    // ---------------------------------------------------------
-    // 2. Find the canonical capability.
-    // ---------------------------------------------------------
-
     const { data: capability, error: capabilityError } =
       await supabase
         .from("capabilities")
-        .select("id, name, slug")
+        .select(`
+          id,
+          name,
+          slug
+        `)
         .eq("slug", intent.capabilitySlug)
         .maybeSingle();
 
@@ -199,227 +484,47 @@ export async function POST(request: NextRequest) {
         state: "INSUFFICIENT_DATA" as RecommendationState,
         query,
         intent,
-        message:
-          "The detected capability is not available in the Gugai catalog yet.",
+        capability: null,
         tools: [],
       });
     }
 
-    // ---------------------------------------------------------
-    // 3. Find tools that FULLY support this capability.
-    // ---------------------------------------------------------
-
-    const { data: toolCapabilities, error: toolCapabilityError } =
-      await supabase
-        .from("tool_capabilities")
-        .select("tool_id, support_mode")
-        .eq("capability_id", capability.id)
-        .eq("support_mode", "FULL");
-
-    if (toolCapabilityError) {
-      console.error(
-        "TOOL CAPABILITY LOOKUP ERROR:",
-        toolCapabilityError
-      );
-
-      return NextResponse.json(
-        {
-          success: false,
-          error: toolCapabilityError.message,
-        },
-        { status: 500 }
-      );
-    }
-
-    const fullSupportToolIds = [
-      ...new Set(
-        (toolCapabilities ?? []).map(
-          (item) => item.tool_id
-        )
-      ),
-    ];
-
-    if (fullSupportToolIds.length === 0) {
-      return NextResponse.json({
-        success: true,
-        state: "NO_MATCH" as RecommendationState,
-        query,
-        intent,
-        capability,
-        tools: [],
-        message:
-          "No catalog tools currently support this capability.",
-      });
-    }
-
-    // ---------------------------------------------------------
-    // 4. Find ACTIVE capability-support claims for those tools.
-    // ---------------------------------------------------------
-
-    const { data: claims, error: claimsError } =
-      await supabase
-        .from("claims")
-        .select(
-          "id, tool_id, capability_id, claim_type, claim_text"
-        )
-        .in("tool_id", fullSupportToolIds)
-        .eq("capability_id", capability.id)
-        .eq("claim_type", "CAPABILITY_SUPPORT")
-        .eq("status", "ACTIVE");
-
-    if (claimsError) {
-      console.error("CLAIMS LOOKUP ERROR:", claimsError);
-
-      return NextResponse.json(
-        {
-          success: false,
-          error: claimsError.message,
-        },
-        { status: 500 }
-      );
-    }
-
-    const claimIds = [
-      ...new Set(
-        (claims ?? []).map((claim) => claim.id)
-      ),
-    ];
-
-    if (claimIds.length === 0) {
-      return NextResponse.json({
-        success: true,
-        state: "NO_MATCH" as RecommendationState,
-        query,
-        intent,
-        capability,
-        tools: [],
-        message:
-          "Matching tools exist, but no active verified capability claims are available.",
-      });
-    }
-
-    // ---------------------------------------------------------
-    // 5. The verification gate.
-    //
-    // Only claims whose verification status is VERIFIED
-    // are allowed to produce public recommendations.
-    // ---------------------------------------------------------
-
-    const { data: verifications, error: verificationError } =
-      await supabase
-        .from("verifications")
-        .select("claim_id, status")
-        .in("claim_id", claimIds)
-        .eq("status", "VERIFIED");
-
-    if (verificationError) {
-      console.error(
-        "VERIFICATION LOOKUP ERROR:",
-        verificationError
-      );
-
-      return NextResponse.json(
-        {
-          success: false,
-          error: verificationError.message,
-        },
-        { status: 500 }
-      );
-    }
-
-    const verifiedClaimIds = new Set(
-      (verifications ?? []).map(
-        (verification) => verification.claim_id
-      )
+    const tools = await getVerifiedToolsForCapability(
+      supabase,
+      capability.id
     );
 
-    // Only tools with at least one VERIFIED claim survive.
-    const verifiedToolIds = [
-      ...new Set(
-        (claims ?? [])
-          .filter((claim) =>
-            verifiedClaimIds.has(claim.id)
-          )
-          .map((claim) => claim.tool_id)
-      ),
-    ];
-
-    if (verifiedToolIds.length === 0) {
+    if (tools.length === 0) {
       return NextResponse.json({
         success: true,
         state: "NO_MATCH" as RecommendationState,
         query,
         intent,
         capability,
+        count: 0,
         tools: [],
-        message:
-          "Matching tools exist, but none currently have a verified capability claim.",
       });
     }
 
-    // ---------------------------------------------------------
-    // 6. Fetch the canonical tool records.
-    // ---------------------------------------------------------
-
-    const { data: tools, error: toolsError } =
-      await supabase
-        .from("tools")
-        .select(`
-          id,
-          name,
-          slug,
-          short_description,
-          website_url,
-          logo_url,
-          verification_status,
-          status,
-          companies (
-            id,
-            name,
-            logo_url
-          )
-        `)
-        .in("id", verifiedToolIds)
-        .eq("status", "ACTIVE")
-        .order("name");
-
-    if (toolsError) {
-      console.error("TOOLS LOOKUP ERROR:", toolsError);
-
-      return NextResponse.json(
-        {
-          success: false,
-          error: toolsError.message,
-        },
-        { status: 500 }
-      );
-    }
-
-    // ---------------------------------------------------------
-    // 7. Return only verified recommendations.
-    // ---------------------------------------------------------
-
-    const verifiedTools = (tools ?? []).map((tool) => ({
-  ...tool,
-  matched_capability_verification_status: "VERIFIED",
-}));
-
-return NextResponse.json({
-  success: true,
-  state: "EXACT_MATCH" as RecommendationState,
-  query,
-  intent,
-  capability,
-  count: verifiedTools.length,
-  tools: verifiedTools,
-});
+    return NextResponse.json({
+      success: true,
+      state: "EXACT_MATCH" as RecommendationState,
+      query,
+      intent,
+      capability,
+      count: tools.length,
+      tools,
+    });
   } catch (error) {
-    console.error("RECOMMEND API ERROR:", error);
+    console.error("RECOMMENDATION ERROR:", error);
 
     return NextResponse.json(
       {
         success: false,
-        error: "Unable to process recommendation request.",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to process recommendation request.",
       },
       { status: 500 }
     );
