@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { detectIntent } from "@/lib/recommendation/intent";
 
 type RecommendationState =
   | "EXACT_MATCH"
@@ -13,113 +14,9 @@ type WorkflowIntent = {
   name: string;
 };
 
-const WORKFLOW_INTENTS: WorkflowIntent[] = [
-  {
-    slug: "podcast-to-video",
-    name: "Podcast to Video",
-  },
-];
-
-function detectWorkflow(query: string): WorkflowIntent | null {
-  const normalized = query.toLowerCase();
-
-  const hasPodcast =
-    normalized.includes("podcast");
-
-  const hasVideo =
-    normalized.includes("video") ||
-    normalized.includes("youtube") ||
-    normalized.includes("shorts");
-
-  if (hasPodcast && hasVideo) {
-    return WORKFLOW_INTENTS[0];
-  }
-
-  return null;
-}
-
-function detectCapability(query: string) {
-  const normalized = query.toLowerCase();
-
-  if (
-    normalized.includes("background") &&
-    (
-      normalized.includes("remove") ||
-      normalized.includes("removal")
-    )
-  ) {
-    return {
-      capabilitySlug: "background-removal",
-      capabilityName: "Background Removal",
-    };
-  }
-
-  if (
-    normalized.includes("video") &&
-    (
-      normalized.includes("create") ||
-      normalized.includes("generate") ||
-      normalized.includes("make")
-    )
-  ) {
-    return {
-      capabilitySlug: "video-generation",
-      capabilityName: "Video Generation",
-    };
-  }
-
-  if (
-    normalized.includes("podcast") &&
-    (
-      normalized.includes("text") ||
-      normalized.includes("transcri")
-    )
-  ) {
-    return {
-      capabilitySlug: "speech-to-text",
-      capabilityName: "Speech to Text",
-    };
-  }
-
-  if (
-    normalized.includes("voiceover") ||
-    normalized.includes("voice over") ||
-    normalized.includes("read aloud")
-  ) {
-    return {
-      capabilitySlug: "text-to-speech",
-      capabilityName: "Text to Speech",
-    };
-  }
-
-  if (
-    normalized.includes("image") &&
-    (
-      normalized.includes("generate") ||
-      normalized.includes("create")
-    )
-  ) {
-    return {
-      capabilitySlug: "image-generation",
-      capabilityName: "Image Generation",
-    };
-  }
-
-  if (
-    normalized.includes("image") &&
-    (
-      normalized.includes("edit") ||
-      normalized.includes("editing")
-    )
-  ) {
-    return {
-      capabilitySlug: "image-editing",
-      capabilityName: "Image Editing",
-    };
-  }
-
-  return null;
-}
+type VerifiedTool = Awaited<
+  ReturnType<typeof getVerifiedToolsForCapability>
+>[number];
 
 async function getVerifiedToolsForCapability(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -243,6 +140,7 @@ async function recommendWorkflow(
       state: "INSUFFICIENT_DATA" as RecommendationState,
       query,
       intent: {
+        type: "WORKFLOW",
         workflowSlug: workflowIntent.slug,
       },
       message: "The requested workflow is not currently available.",
@@ -278,6 +176,7 @@ async function recommendWorkflow(
       state: "INSUFFICIENT_DATA" as RecommendationState,
       query,
       intent: {
+        type: "WORKFLOW",
         workflowSlug: workflow.slug,
         workflowName: workflow.name,
       },
@@ -355,7 +254,7 @@ async function recommendWorkflow(
    * Flatten tools for compatibility with the current page.tsx.
    * The structured workflow steps remain the canonical response.
    */
-  const uniqueTools = new Map<string, any>();
+  const uniqueTools = new Map<string, VerifiedTool>();
 
   for (const step of workflowSteps) {
     for (const tool of step.tools) {
@@ -368,6 +267,7 @@ async function recommendWorkflow(
     state,
     query,
     intent: {
+      type: "WORKFLOW",
       workflowSlug: workflow.slug,
       workflowName: workflow.name,
     },
@@ -399,50 +299,25 @@ export async function POST(request: Request) {
 
     const supabase = await createClient();
 
-    /*
-     * ---------------------------------------------------------
-     * 1. WORKFLOW MATCHING
-     * ---------------------------------------------------------
-     *
-     * Check workflows first because a workflow query can contain
-     * capability keywords such as "video".
-     *
-     * Example:
-     * "Turn my podcast into a video"
-     *
-     * should become:
-     * Podcast to Video workflow
-     *
-     * rather than:
-     * Video Generation only.
-     */
-    const workflowIntent = detectWorkflow(query);
+    const detectedIntent = detectIntent(query);
 
-    if (workflowIntent) {
+    if (detectedIntent.type === "WORKFLOW" && detectedIntent.workflow) {
       return NextResponse.json(
         await recommendWorkflow(
           supabase,
-          workflowIntent,
+          detectedIntent.workflow,
           query
         )
       );
     }
 
-    /*
-     * ---------------------------------------------------------
-     * 2. SINGLE CAPABILITY MATCHING
-     * ---------------------------------------------------------
-     *
-     * Preserve the existing deterministic recommendation path.
-     */
-    const intent = detectCapability(query);
-
-    if (!intent) {
+    if (detectedIntent.type === "UNKNOWN") {
       return NextResponse.json({
         success: true,
         state: "INSUFFICIENT_DATA" as RecommendationState,
         query,
         intent: {
+          type: "UNKNOWN",
           capabilitySlug: null,
           capabilityName: null,
         },
@@ -452,7 +327,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const { data: capability, error: capabilityError } =
+    const { data: capabilities, error: capabilitiesError } =
       await supabase
         .from("capabilities")
         .select(`
@@ -460,30 +335,98 @@ export async function POST(request: Request) {
           name,
           slug
         `)
-        .eq("slug", intent.capabilitySlug)
-        .maybeSingle();
+        .in(
+          "slug",
+          detectedIntent.capabilities.map((capability) => capability.slug)
+        );
 
-    if (capabilityError) {
+    if (capabilitiesError) {
       console.error(
         "CAPABILITY LOOKUP ERROR:",
-        capabilityError
+        capabilitiesError
       );
 
       return NextResponse.json(
         {
           success: false,
-          error: capabilityError.message,
+          error: capabilitiesError.message,
         },
         { status: 500 }
       );
     }
+
+    const capabilityBySlug = new Map(
+      (capabilities ?? []).map((capability) => [capability.slug, capability])
+    );
+
+    if (detectedIntent.type === "MULTI_CAPABILITY") {
+      const capabilityMatches = [];
+      const uniqueTools = new Map<string, VerifiedTool>();
+
+      for (const detectedCapability of detectedIntent.capabilities) {
+        const capability = capabilityBySlug.get(detectedCapability.slug);
+
+        if (!capability) {
+          capabilityMatches.push({
+            capability: null,
+            detected_capability: detectedCapability,
+            state: "INSUFFICIENT_DATA" as RecommendationState,
+            tools: [],
+          });
+          continue;
+        }
+
+        const tools = await getVerifiedToolsForCapability(
+          supabase,
+          capability.id
+        );
+
+        for (const tool of tools) {
+          uniqueTools.set(tool.id, tool);
+        }
+
+        capabilityMatches.push({
+          capability,
+          state:
+            tools.length > 0
+              ? ("EXACT_MATCH" as RecommendationState)
+              : ("NO_MATCH" as RecommendationState),
+          tools,
+        });
+      }
+
+      return NextResponse.json({
+        success: true,
+        state:
+          capabilityMatches.every((match) => match.tools.length > 0)
+            ? ("EXACT_MATCH" as RecommendationState)
+            : capabilityMatches.some((match) => match.tools.length > 0)
+              ? ("PARTIAL_MATCH" as RecommendationState)
+              : ("NO_MATCH" as RecommendationState),
+        query,
+        intent: detectedIntent,
+        capabilities: detectedIntent.capabilities,
+        capability_matches: capabilityMatches,
+        count: uniqueTools.size,
+        tools: Array.from(uniqueTools.values()),
+      });
+    }
+
+    const detectedCapability = detectedIntent.capabilities[0];
+    const capability = detectedCapability
+      ? capabilityBySlug.get(detectedCapability.slug)
+      : null;
 
     if (!capability) {
       return NextResponse.json({
         success: true,
         state: "INSUFFICIENT_DATA" as RecommendationState,
         query,
-        intent,
+        intent: {
+          ...detectedIntent,
+          capabilitySlug: detectedCapability?.slug ?? null,
+          capabilityName: detectedCapability?.name ?? null,
+        },
         capability: null,
         tools: [],
       });
@@ -499,7 +442,11 @@ export async function POST(request: Request) {
         success: true,
         state: "NO_MATCH" as RecommendationState,
         query,
-        intent,
+        intent: {
+          ...detectedIntent,
+          capabilitySlug: detectedCapability.slug,
+          capabilityName: detectedCapability.name,
+        },
         capability,
         count: 0,
         tools: [],
@@ -510,7 +457,11 @@ export async function POST(request: Request) {
       success: true,
       state: "EXACT_MATCH" as RecommendationState,
       query,
-      intent,
+      intent: {
+        ...detectedIntent,
+        capabilitySlug: detectedCapability.slug,
+        capabilityName: detectedCapability.name,
+      },
       capability,
       count: tools.length,
       tools,
