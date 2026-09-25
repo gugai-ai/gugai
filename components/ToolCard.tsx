@@ -5,6 +5,7 @@ type ToolCardProps = {
   logoUrl: string | null;
   companyName: string;
   verificationStatus?: string;
+  capabilityNames?: string[];
 };
 
 export default function ToolCard({
@@ -14,6 +15,7 @@ export default function ToolCard({
   logoUrl,
   companyName,
   verificationStatus,
+  capabilityNames,
 }: ToolCardProps) {
   const showVerified =
     verificationStatus === "VERIFIED";
@@ -53,6 +55,12 @@ export default function ToolCard({
           <p className="mt-1 text-sm text-zinc-500">
             {companyName}
           </p>
+
+          {capabilityNames && capabilityNames.length > 0 && (
+            <p className="mt-3 text-xs text-zinc-400">
+              Covers: {capabilityNames.join(", ")}
+            </p>
+          )}
 
           <p className="mt-4 text-sm leading-6 text-zinc-400">
             {description}

@@ -51,6 +51,22 @@ type Workflow = {
   follow_up_prompts?: unknown;
 };
 
+type DetectedCapability = {
+  slug: string;
+  name: string;
+};
+
+type CapabilityMatch = {
+  capability: {
+    id: string;
+    name: string;
+    slug: string;
+  } | null;
+  detected_capability?: DetectedCapability;
+  state: string;
+  tools: Tool[];
+};
+
 type Message = {
   id: string;
   role: "user" | "assistant";
@@ -59,6 +75,9 @@ type Message = {
   workflow?: Workflow;
   steps?: WorkflowStep[];
   state?: string;
+  intentType?: string;
+  capabilities?: DetectedCapability[];
+  capabilityMatches?: CapabilityMatch[];
 };
 
 export default function Home() {
@@ -124,6 +143,13 @@ export default function Home() {
                 stepCount === 1 ? "" : "s"
               }.`
             : `I found the ${workflowName} workflow.`;
+      } else if (result.intent?.type === "MULTI_CAPABILITY") {
+        const capabilityCount = result.capabilities?.length || 0;
+
+        assistantContent =
+          capabilityCount > 0
+            ? `I found a solution covering ${capabilityCount} capabilities.`
+            : "I found a solution covering multiple capabilities.";
       } else if (result.state === "EXACT_MATCH") {
         assistantContent =
           result.tools?.length > 0
@@ -153,6 +179,9 @@ export default function Home() {
         workflow: result.workflow ?? undefined,
         steps: result.steps ?? [],
         state: result.state,
+        intentType: result.intent?.type,
+        capabilities: result.capabilities ?? [],
+        capabilityMatches: result.capability_matches ?? [],
       };
 
       setMessages((previous) => [...previous, assistantMessage]);
@@ -363,6 +392,107 @@ export default function Home() {
     );
   }
 
+  function renderMultiCapabilityRecommendation(
+    capabilityMatches: CapabilityMatch[],
+    tools: Tool[]
+  ) {
+    const toolCapabilities = new Map<string, string[]>();
+
+    for (const match of capabilityMatches) {
+      const capabilityName =
+        match.capability?.name ||
+        match.detected_capability?.name;
+
+      if (!capabilityName) {
+        continue;
+      }
+
+      for (const tool of match.tools) {
+        const names = toolCapabilities.get(tool.id) ?? [];
+
+        if (!names.includes(capabilityName)) {
+          names.push(capabilityName);
+        }
+
+        toolCapabilities.set(tool.id, names);
+      }
+    }
+
+    return (
+      <div className="grid gap-6">
+        <div className="grid gap-3">
+          {capabilityMatches.map((match) => {
+            const capabilityName =
+              match.capability?.name ||
+              match.detected_capability?.name ||
+              "Detected capability";
+
+            return (
+              <section
+                key={
+                  match.capability?.id ||
+                  match.detected_capability?.slug ||
+                  capabilityName
+                }
+                className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5"
+              >
+                <h3 className="text-base font-semibold text-white">
+                  {capabilityName}
+                </h3>
+
+                {match.tools.length > 0 ? (
+                  <ul className="mt-3 space-y-2">
+                    {match.tools.map((tool) => (
+                      <li
+                        key={tool.id}
+                        className="flex items-center gap-2 text-sm text-zinc-300"
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                        {tool.name}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-3 text-sm text-zinc-500">
+                    No verified tool is currently available.
+                  </p>
+                )}
+              </section>
+            );
+          })}
+        </div>
+
+        {tools.length > 0 && (
+          <section>
+            <h3 className="mb-3 text-base font-semibold text-white">
+              Recommended tools
+            </h3>
+
+            <div className="grid gap-3">
+              {tools.map((tool) => (
+                <ToolCard
+                  key={tool.id}
+                  name={tool.name}
+                  description={tool.short_description}
+                  websiteUrl={tool.website_url}
+                  logoUrl={tool.logo_url}
+                  companyName={tool.companies.name}
+                  capabilityNames={toolCapabilities.get(tool.id)}
+                  verificationStatus={
+                    tool.matched_capability_verification_status ===
+                    "VERIFIED"
+                      ? "CAPABILITY VERIFIED"
+                      : tool.verification_status
+                  }
+                />
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    );
+  }
+
   const examplePrompts = [
     "Turn my podcast into YouTube Shorts",
     "Find the best AI tools for creating product videos",
@@ -453,6 +583,19 @@ export default function Home() {
 
                     {/* Normal tool recommendation */}
                     {message.role === "assistant" &&
+                      message.intentType === "MULTI_CAPABILITY" &&
+                      message.capabilityMatches && (
+                        <div>
+                          {renderMultiCapabilityRecommendation(
+                            message.capabilityMatches,
+                            message.tools ?? []
+                          )}
+                        </div>
+                      )}
+
+                    {/* Normal tool recommendation */}
+                    {message.role === "assistant" &&
+                      message.intentType !== "MULTI_CAPABILITY" &&
                       message.state !== "WORKFLOW_MATCH" &&
                       message.tools &&
                       message.tools.length > 0 && (
