@@ -14,6 +14,7 @@ type Tool = {
   website_url: string;
   logo_url: string | null;
   verification_status: string;
+  matched_capability_verification_status?: string;
   companies: {
     id: string;
     name: string;
@@ -250,7 +251,7 @@ export default function Home() {
                                 tool.companies.name
                               }
                               verificationStatus={
-                                tool.verification_status
+                                tool.matched_capability_verification_status
                               }
                             />
                           ))}
